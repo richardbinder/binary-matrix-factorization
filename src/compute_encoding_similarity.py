@@ -63,4 +63,4 @@ if __name__ == "__main__":
                     }
                 )
     
-    pd.DataFrame(results).to_parquet("similarity_res/similarity_" + file_name + '.parquet')
+    pd.DataFrame(results).to_parquet("output/similarity_res/similarity_" + file_name + '.parquet')
