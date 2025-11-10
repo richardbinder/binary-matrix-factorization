@@ -1,4 +1,4 @@
-from common import load_dataset
+from src.common.common import load_dataset
 import json
 import os
 import numpy as np

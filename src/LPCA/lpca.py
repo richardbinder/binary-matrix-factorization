@@ -5,7 +5,7 @@ import numpy as np
 import scipy as sp
 import scipy.io, scipy.optimize
 from scipy.special import expit
-from common import time_wrapper
+from src.common.common import time_wrapper
 
 
 def lpca_loss(factors, adj_s, rank, V_fixed=None): # adj_s = shifted adj with -1's and +1's

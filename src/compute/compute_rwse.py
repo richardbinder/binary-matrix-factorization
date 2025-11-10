@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.utils import (to_dense_adj, scatter)
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from common import load_dataset
+from src.common.common import load_dataset
 import numpy as np
 import sys
 

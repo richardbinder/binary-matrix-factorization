@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
 import math
-from common import time_wrapper
+from src.common.common import time_wrapper
 
 
 def error_func_frobenius(A, B):

@@ -1,11 +1,11 @@
 import sys
+
 import numpy as np
 import pandas as pd
+import torch
 from tqdm import tqdm
 
-import torch
-
-from common_new import (
+from src.common.common_new import (
     construct_adjacency_matrix,
     load_dataset,
     time_wrapper,
@@ -49,7 +49,7 @@ def lpca_sim_loss_torch(L, R, adj_s, W, gamma=0.2):
     lpca_loss = torch.logaddexp(
         torch.zeros_like(neg_logits_y),
         neg_logits_y
-    ).sum()
+    ).mean()
 
     if gamma == 0:
         return lpca_loss
@@ -57,9 +57,10 @@ def lpca_sim_loss_torch(L, R, adj_s, W, gamma=0.2):
     # (n, n) pairwise squared distances; no (n,n,k) tensors created
     L_dist = pairwise_sq_dists(L)              # (n, n)
     R_dist = pairwise_sq_dists(R.t())          # (n, n)
-    # sim_loss = (L_dist + R_dist - W.pow(2)).abs().mean()
+    sim_loss = (L_dist + R_dist - W).abs().mean()
 
-
+    # inv_W = 1.0 / ((W + 1.0) ** 2)     # (n, n)
+    # sim_loss = 0.5 * ((L_dist + R_dist) * inv_W).sum()
 
     return lpca_loss + gamma * sim_loss
 
@@ -103,7 +104,7 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, device=None):
 
     optimizer = torch.optim.LBFGS(
         [L, R],
-        max_iter=3000,
+        max_iter=300,
         line_search_fn="strong_wolfe",
     )
 
@@ -112,10 +113,12 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, device=None):
     #     lr=1e-2
     # )
 
+    W2 = W.pow(2)
+
     def closure():
         optimizer.zero_grad()
 
-        loss = lpca_sim_loss_torch(L, R, adj_s, W, gamma=gamma)
+        loss = lpca_sim_loss_torch(L, R, adj_s, W2, gamma=gamma)
         loss.backward()
 
         # approximate bound handling by projection
@@ -126,8 +129,10 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, device=None):
 
         return loss
 
-    # for _ in range(3000):
-    #     optimizer.step(closure)
+    # for _ in range(300):
+    #      optimizer.step(closure)
+
+    optimizer.step(closure)
 
     # Try to read iterations from optimizer state (may not always be present)
     state = optimizer.state.get(L, {})

@@ -1,4 +1,4 @@
-from common import measure_encoding_similarity, construct_adjacency_matrix, load_dataset
+from src.common.common import measure_encoding_similarity, construct_adjacency_matrix, load_dataset
 import numpy as np
 import pandas as pd
 from tqdm import tqdm

@@ -1,14 +1,13 @@
+import sys
+
 import numpy as np
 import pandas as pd
 import scipy as sp
-from tqdm import tqdm
-import sys
-from common import construct_adjacency_matrix, load_dataset
-
-import numpy as np
-import scipy as sp
 from scipy.special import expit
-from common import time_wrapper, measure_encoding_similarity
+from tqdm import tqdm
+
+from src.common.common import construct_adjacency_matrix, load_dataset
+from src.common.common import time_wrapper, measure_encoding_similarity
 
 
 def sim_grad(W, L):

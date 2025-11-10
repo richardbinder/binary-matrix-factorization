@@ -1,7 +1,7 @@
 import numpy as np
 import scipy as sp
 import pandas as pd
-from common import construct_adjacency_matrix, load_dataset
+from src.common.common import construct_adjacency_matrix, load_dataset
 from LPCA.lpca import decomposition_at_k
 from tqdm import tqdm
 import sys

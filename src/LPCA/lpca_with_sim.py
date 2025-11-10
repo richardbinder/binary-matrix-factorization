@@ -1,7 +1,7 @@
 import numpy as np
 import scipy as sp
 from scipy.special import expit
-from common import time_wrapper, measure_encoding_similarity
+from src.common.common import time_wrapper, measure_encoding_similarity
 
 
 def sim_grad(W, L):
