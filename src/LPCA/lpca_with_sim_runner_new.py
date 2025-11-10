@@ -41,6 +41,7 @@ def lpca_sim_loss_torch(L, R, adj_s, W, gamma=0.2):
 
     returns: scalar loss tensor
     """
+
     # LPCA part
     logits = L @ R  # (n, n)
     neg_logits_y = -logits * adj_s  # (n, n)
@@ -55,9 +56,15 @@ def lpca_sim_loss_torch(L, R, adj_s, W, gamma=0.2):
         return lpca_loss
 
     # (n, n) pairwise squared distances; no (n,n,k) tensors created
+
+    norms = (L.pow(2) + R.T.pow(2)).sum(dim=1).pow(1/2).unsqueeze(1)
+    L = L/norms
+    R = R/norms.T
+
     L_dist = pairwise_sq_dists(L)              # (n, n)
     R_dist = pairwise_sq_dists(R.t())          # (n, n)
-    sim_loss = (L_dist + R_dist - W).abs().mean()
+    dist = (L_dist + R_dist) / 4.0
+    sim_loss = (dist - W).abs().mean()
 
     # inv_W = 1.0 / ((W + 1.0) ** 2)     # (n, n)
     # sim_loss = 0.5 * ((L_dist + R_dist) * inv_W).sum()
@@ -66,7 +73,7 @@ def lpca_sim_loss_torch(L, R, adj_s, W, gamma=0.2):
 
 
 @time_wrapper
-def lpca_encoding(A, k, bound=None, gamma=0.5, device=None):
+def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=6, device=None):
     """
     A: torch tensor (n, n) with 0/1 entries (dense adjacency)
     k: embedding dimension
@@ -113,7 +120,8 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, device=None):
     #     lr=1e-2
     # )
 
-    W2 = W.pow(2)
+    W2 = W/w_norm
+    W2 = W2.pow(2)
 
     def closure():
         optimizer.zero_grad()
@@ -175,7 +183,7 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
         # Now returns a dense torch tensor adjacency
         A = construct_adjacency_matrix(data[i])
 
-        t, error, d_mean, d_std, nit, enc = lpca_encoding(A, k, bound, gamma, device)
+        t, error, d_mean, d_std, nit, enc = lpca_encoding(A, k, bound, gamma, 6, device)
         matrices[f"idx_{i}"] = enc
 
         print(error)
