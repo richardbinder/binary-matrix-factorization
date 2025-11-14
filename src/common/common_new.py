@@ -72,7 +72,16 @@ def neighbourhood_symmetric_difference(u_neigh, v_neigh):
     return np.count_nonzero(np.logical_xor(u_bool, v_bool))
 
 
-def measure_encoding_similarity(A, encodings):
+def neighbourhood_symmetric_difference(u_neigh, v_neigh):
+    """
+    u_neigh, v_neigh: 1D numpy arrays (0/1)
+    """
+    u_bool = np.asarray(u_neigh).astype(bool)
+    v_bool = np.asarray(v_neigh).astype(bool)
+    return np.count_nonzero(np.logical_xor(u_bool, v_bool))
+
+
+def measure_encoding_similarity(A, encodings, w_max):
     """
     A: adjacency matrix of shape (n, n)
        - can be numpy array or torch tensor
@@ -98,7 +107,8 @@ def measure_encoding_similarity(A, encodings):
 
             if d not in similarity:
                 similarity[d] = []
-            similarity[d].append(np.linalg.norm(enc_np[v] - enc_np[w]))
+            d_sim = 1 - np.abs(np.linalg.vecdot(enc_np[v], enc_np[w]))
+            similarity[d].append(d_sim)
 
     return similarity
 
