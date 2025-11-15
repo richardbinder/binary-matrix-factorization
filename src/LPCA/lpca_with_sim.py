@@ -23,13 +23,15 @@ def sim_loss(W, L_diff, R_diff):
     """
     L_dist = np.sum(L_diff**2, axis=2)
     R_dist = np.sum(R_diff**2, axis=2)
-    return 0.5 * np.sum((L_dist + R_dist) / ((W + 1) ** 2))
+    return 0.5 * np.mean((L_dist + R_dist) / ((W + 1) ** 2))
 
 
 def normalize_enc(L, eps=1e-8):
     norms = np.linalg.norm(L, axis=1, keepdims=True)  # shape: (n, 1)
     return L / (norms + eps)
 
+global count
+count = 0
 
 def lpca_sim_loss(factors, adj_s, A, k, gamma=0.2):
     # adj_s = shifted adj with -1's and +1's
@@ -41,7 +43,7 @@ def lpca_sim_loss(factors, adj_s, A, k, gamma=0.2):
     # lpca loss and grads
     logits = L @ R
     prob_wrong = expit(-logits * adj_s)  # (n, n)
-    l_loss = (np.logaddexp(0, -logits * adj_s)).sum()
+    l_loss = (np.logaddexp(0, -logits * adj_s)).mean()
     L_lpca_grad = -((prob_wrong) * adj_s) @ R.T  # (n, k)
     R_lpca_grad = -L.T @ (prob_wrong * adj_s)  # (k, n)
 
@@ -60,6 +62,12 @@ def lpca_sim_loss(factors, adj_s, A, k, gamma=0.2):
     s_loss = sim_loss(W, L_diff, R_diff)
     L_sim_grad = sim_grad(W, L)
     R_sim_grad = sim_grad(W, R.T).T
+
+    global count
+    if count >= 200:
+        count = 0
+    else:
+        count += 1
 
     return l_loss + gamma * s_loss, np.concatenate(
         (

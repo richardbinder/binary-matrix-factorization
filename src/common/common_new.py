@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch_geometric.datasets import ZINC, GNNBenchmarkDataset, LRGBDataset
+from src.compute.compute_properties import get_sim_targets
 
 
 def construct_adjacency_matrix(data: torch.Tensor):
@@ -81,7 +82,7 @@ def neighbourhood_symmetric_difference(u_neigh, v_neigh):
     return np.count_nonzero(np.logical_xor(u_bool, v_bool))
 
 
-def measure_encoding_similarity(A, encodings, w_max):
+def measure_encoding_similarity(A, encodings, enc_method="Dist"):
     """
     A: adjacency matrix of shape (n, n)
        - can be numpy array or torch tensor
@@ -101,13 +102,21 @@ def measure_encoding_similarity(A, encodings, w_max):
     similarity = {}
     n_nodes = A_np.shape[0]
 
+    W, _, _, _ = get_sim_targets(A, enc_method=enc_method)
+
     for v in range(n_nodes):
         for w in range(v + 1, n_nodes):
-            d = neighbourhood_symmetric_difference(A_np[v], A_np[w])
+            d = round(W[v][w].item())
 
             if d not in similarity:
                 similarity[d] = []
-            d_sim = 1 - np.abs(np.linalg.vecdot(enc_np[v], enc_np[w]))
+            if enc_method == "Dist":
+                d_sim = np.linalg.norm(enc_np[v] - enc_np[w])
+            elif enc_method == "Sim":
+                d_sim = np.abs(np.linalg.vecdot(enc_np[v], enc_np[w]))
+            else:
+                raise ValueError("Unknown method")
+
             similarity[d].append(d_sim)
 
     return similarity

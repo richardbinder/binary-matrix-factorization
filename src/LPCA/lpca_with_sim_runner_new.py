@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
+from src.compute.compute_properties import get_sim_targets
+from src.LPCA.lpca_losses import lpca_dist_loss, lpca_sim_loss
 
 from src.common.common_new import (
     construct_adjacency_matrix,
@@ -12,8 +14,8 @@ from src.common.common_new import (
     measure_encoding_similarity,
 )
 
-global count
-count = 0
+
+enc_method = "Dist"
 
 
 def normalize_enc_torch(L, eps=1e-8):
@@ -26,95 +28,29 @@ def normalize_enc_torch(L, eps=1e-8):
     norms = torch.norm(L, dim=1, keepdim=True)
     return L / (norms + eps)
 
-def pairwise_sq_dists(X: torch.Tensor) -> torch.Tensor:
-    # X: (n, k)
-    # returns D where D[i,j] = ||X[i]-X[j]||^2, shape: (n, n)
-    G = X @ X.T                         # Gram (n, n)
-    diag = torch.diag(G)                # (n,)
-    return diag[:, None] + diag[None, :] - 2.0 * G
 
-def pairwise_dot_products(X: torch.Tensor) -> torch.Tensor:
-    """
-    Compute pairwise dot products between all rows of X.
+def handle_bound(L, R, bound=None):
+    # approximate bound handling by projection
+    pass
+    # if bound is not None:
+    #     with torch.no_grad():
+    #         L.clamp_(-bound, bound)
+    #         R.clamp_(-bound, bound)
 
-    X: (n, k)
-    returns: D where D[i, j] = X[i] · X[j], shape: (n, n)
-    """
-    return X @ X.T
 
-def lpca_sim_loss_torch(L, R, adj_s, W, weights, params, gamma=0.2):
-    """
-    L: (n, k) torch tensor
-    R: (k, n) torch tensor
-    adj_s: (n, n) torch tensor with entries in {-1, +1}
-    W: (n, n) torch tensor with neighborhood dissimilarities (>= 0)
-    gamma: float
+def closure(optimizer, handle_bound_fnc, loss_fnc):
+    optimizer.zero_grad()
 
-    returns: scalar loss tensor
-    """
+    loss, lpca_loss, sim_loss = loss_fnc()
+    loss.backward()
 
-    # LPCA part
-    logits = L @ R  # (n, n)
-    neg_logits_y = -logits * adj_s  # (n, n)
+    handle_bound_fnc()
 
-    # log(1 + exp(-y f(x))) = logaddexp(0, -y f(x))
-    lpca_loss = torch.logaddexp(
-        torch.zeros_like(neg_logits_y),
-        neg_logits_y
-    ).mean()
-
-    if gamma == 0:
-        return lpca_loss
-
-    # (n, n) pairwise squared distances; no (n,n,k) tensors created
-
-    norms = (L.pow(2) + R.T.pow(2)).sum(dim=1).pow(1/2).unsqueeze(1)
-    L = L/norms
-    R = R/norms.T
-
-    L_sim = pairwise_dot_products(L)              # (n, n)
-    R_sim = pairwise_dot_products(R.t())          # (n, n)
-    sim = L_sim + R_sim
-
-    # dist = params[0] + params[2] * sim.abs()
-    dist = 1 - sim.abs()
-
-    e = 0.01
-    try:
-        assert torch.max(dist) <= 1+e
-        assert torch.min(dist) >= 0-e
-        assert torch.max(W) <= 1+e
-        assert torch.min(W) >= 0-e
-    except AssertionError:
-        print(W)
-
-    # transform from distance to similarity
-    # W_sim = -W
-    # transform from [0,1] to [-1,+1]
-    # W_sim = 2*W_sim + 1
-    #
-    # try:
-    #     assert torch.max(W) <= 1+e
-    #     assert torch.min(W_sim) >= -1-e
-    # except AssertionError:
-    #     print(W_sim)
-
-    sim_loss = ((dist - W).abs() * weights).mean()
-
-    # inv_W = 1.0 / ((W + 1.0) ** 2)     # (n, n)
-    # sim_loss = 0.5 * ((L_dist + R_dist) * inv_W).sum()
-
-    global count
-    if count >= 2500:
-        count = 0
-    else:
-        count += 1
-
-    return lpca_loss + gamma * sim_loss
+    return loss, lpca_loss, sim_loss
 
 
 @time_wrapper
-def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
+def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     """
     A: torch tensor (n, n) with 0/1 entries (dense adjacency)
     k: embedding dimension
@@ -139,10 +75,6 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
     # shifted adjacency: -1 for 0, +1 for 1
     adj_s = -1.0 + 2.0 * adj  # (n, n), in {-1, +1}
 
-    # W: neighborhood dissimilarity matrix via XOR over adjacency rows
-    A_bool = adj.bool()
-    W = (A_bool.unsqueeze(1) ^ A_bool.unsqueeze(0)).sum(dim=2).to(torch.float32)  # (n, n)
-
     # Initialize factors L, R in [-1, 1]
     L = torch.empty((n, k), device=device).uniform_(-1.0, 1.0)
     R = torch.empty((k, n), device=device).uniform_(-1.0, 1.0)
@@ -161,10 +93,8 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
 
     optimizer = torch.optim.Adam(
         [L, R],
-        lr=1e-2
+        lr=5e-1
     )
-
-    W2 = W/w_norm
 
     counts = torch.bincount(W.int().flatten(), minlength=11)
     # Replace each value with its count
@@ -172,22 +102,21 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
     weights = torch.sqrt(weights)
     weights = weights / weights.mean()
 
-    def closure():
-        optimizer.zero_grad()
+    final_loss = 0
+    final_lpca_loss = 0
+    final_sim_loss = 0
 
-        loss = lpca_sim_loss_torch(L, R, adj_s, W2, weights, params, gamma=gamma)
-        loss.backward()
+    if enc_method == "Dist":
+        loss_fnc = lambda: lpca_dist_loss(L, R, adj_s, W, weights, params, gamma=gamma)
+    elif enc_method == "Sim":
+        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=gamma)
+    else:
+        raise ValueError(f"Unknown method {enc_method}")
 
-        # approximate bound handling by projection
-        if bound is not None:
-            with torch.no_grad():
-                L.clamp_(-bound, bound)
-                R.clamp_(-bound, bound)
-
-        return loss
-
-    for _ in range(3000):
-         optimizer.step(closure)
+    for _ in range(1000):
+        handle_bound_fnc = lambda: handle_bound(L, R, bound)
+        final_loss, final_lpca_loss, final_sim_loss = closure(optimizer, handle_bound_fnc, loss_fnc)
+        optimizer.step()
 
     # optimizer.step(closure)
 
@@ -198,12 +127,12 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
     # Build final normalized encoding on CPU for downstream numpy-based stuff
     with torch.no_grad():
         enc = torch.cat([L, R.t()], dim=1)  # (n, 2k)
-        enc = normalize_enc_torch(enc)      # (n, 2k)
-        enc_np = enc.cpu().numpy()
+        enc_norm = normalize_enc_torch(enc).cpu().numpy()
+        enc = enc.cpu().numpy()
 
     # Reconstruct adjacency from normalized encodings
-    L_n = enc_np[:, :k]
-    R_n = enc_np[:, k:]
+    L_n = enc_norm[:, :k]
+    R_n = enc_norm[:, k:]
     A_reconstructed = (L_n @ R_n.T > 0).astype(np.float32)
 
     A_dense_np = adj.cpu().numpy()  # original adjacency
@@ -212,37 +141,40 @@ def lpca_encoding(A, k, bound=None, gamma=0.5, w_norm=16, device=None):
     error = num / denom if denom != 0 else 0.0
 
     # similarity stats (kept as in the original)
-    sim = measure_encoding_similarity(A_dense_np, enc_np, w_norm)
+    sim = measure_encoding_similarity(A_dense_np, enc_norm, enc_method)
     d_mean = []
     d_std = []
     for _, x in sorted(sim.items()):
         d_mean.append(np.mean(x))
         d_std.append(np.std(x))
 
-    return error, d_mean, d_std, nit, enc_np
+    return final_loss, final_lpca_loss, final_sim_loss, error, d_mean, d_std, nit, enc_norm, enc
 
 
 def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, device=None):
+    matrices_norm = {}
     matrices = {}
     results = []
 
     idx_max = len(data) if n_samples is None else n_samples
 
-    w_max = 0
+    Ws = []
     for i in tqdm(range(idx_max)):
         A = construct_adjacency_matrix(data[i])
-        A_bool = A.bool()
-        W = (A_bool.unsqueeze(1) ^ A_bool.unsqueeze(0)).sum(dim=2).to(torch.float32)  # (n, n)
-        w_max = np.max([torch.max(W).item(), w_max])
+        W, _, _, _ = get_sim_targets(A, enc_method, device=device)
+        Ws.append(W)
+
+    tqdm.write("\n")
 
     for i in tqdm(range(idx_max)):
         # Now returns a dense torch tensor adjacency
         A = construct_adjacency_matrix(data[i])
 
-        t, error, d_mean, d_std, nit, enc = lpca_encoding(A, k, bound, gamma, w_max, device)
+        t, final_loss, final_lpca_loss, final_sim_loss, error, d_mean, d_std, nit, enc_norm, enc = lpca_encoding(A, k, Ws[i], bound, gamma, device)
+        matrices_norm[f"idx_{i}"] = enc_norm
         matrices[f"idx_{i}"] = enc
 
-        print(error)
+        tqdm.write(f"Rec. Error: {error}, Sim Std: {np.mean(d_std)}, Final Loss: {final_loss}, Final LPCA Loss: {final_lpca_loss}, Final Sim Loss: {final_sim_loss}")
 
         results.append(
             {
@@ -256,6 +188,7 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
             }
         )
 
+    np.savez_compressed(out_path + "_norm.npz", **matrices_norm)
     np.savez_compressed(out_path + ".npz", **matrices)
     pd.DataFrame(results).to_parquet(out_path + ".parquet")
 
@@ -263,20 +196,28 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
 if __name__ == "__main__":
     # python lpca_with_sim_runner_torch.py ZINC 4 8 10 1000
     name = sys.argv[1]
+
+    print("\n")
+    print("#################################")
+    print(f"Computing Encodings for {name}")
+    print("#################################\n")
+
+    enc_method = sys.argv[2]
+
     data = load_dataset(name)
 
     bound = None
-    if sys.argv[2].lower() != "none":
-        bound = int(sys.argv[2])
+    if sys.argv[3].lower() != "none":
+        bound = int(sys.argv[3])
 
-    k = int(sys.argv[3])
-    gamma = float(sys.argv[4])
+    k = int(sys.argv[4])
+    gamma = float(sys.argv[5])
     n_samples = None
 
-    if len(sys.argv) > 5:
-        n_samples = int(sys.argv[5])
+    if len(sys.argv) > 6:
+        n_samples = int(sys.argv[6])
 
-    out_path = f"lpca_out/lpca_with_sim_{name}_k{k}_b{bound}_gamma{gamma}_s{n_samples}"
+    out_path = f"lpca_out/lpca_with_sim_new_{name}_method{enc_method}_k{k}_b{bound}_gamma{gamma}_s{n_samples}"
 
     compute_encodings(data, k, out_path, bound, gamma, n_samples, "cpu")
 
