@@ -27,9 +27,9 @@ def get_sim_targets(A, enc_method="Dist", eps=1e-1, device=None):
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    r_D = torch.linalg.matrix_rank(neighbourhood_diff.float())
-    r_A = torch.linalg.matrix_rank(A.float())
-    r_W = torch.linalg.matrix_rank(W.float())
+    # r_D = torch.linalg.matrix_rank(neighbourhood_diff.float())
+    # r_A = torch.linalg.matrix_rank(A.float())
+    # r_W = torch.linalg.matrix_rank(W.float())
 
     return W, neighbourhood_diff, neighbourhood_sim, neighbourhood_path3
 
