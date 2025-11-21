@@ -12,6 +12,8 @@ from src.common.common_new import (
     load_dataset,
     time_wrapper,
     measure_encoding_similarity,
+    bin_and_stats,
+    std_of_y_std
 )
 
 
@@ -113,7 +115,7 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    for _ in range(1000):
+    for _ in range(300):
         handle_bound_fnc = lambda: handle_bound(L, R, bound)
         final_loss, final_lpca_loss, final_sim_loss = closure(optimizer, handle_bound_fnc, loss_fnc)
         optimizer.step()
@@ -141,14 +143,10 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     error = num / denom if denom != 0 else 0.0
 
     # similarity stats (kept as in the original)
-    sim = measure_encoding_similarity(A_dense_np, enc_norm, enc_method)
-    d_mean = []
-    d_std = []
-    for _, x in sorted(sim.items()):
-        d_mean.append(np.mean(x))
-        d_std.append(np.std(x))
+    sim_pairs = measure_encoding_similarity(A_dense_np, enc_norm, enc_method)
+    d_list, sim_mean_list, sim_std_list = bin_and_stats(sim_pairs)
 
-    return final_loss, final_lpca_loss, final_sim_loss, error, d_mean, d_std, nit, enc_norm, enc
+    return final_loss, final_lpca_loss, final_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc
 
 
 def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, device=None):
@@ -170,11 +168,11 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
         # Now returns a dense torch tensor adjacency
         A = construct_adjacency_matrix(data[i])
 
-        t, final_loss, final_lpca_loss, final_sim_loss, error, d_mean, d_std, nit, enc_norm, enc = lpca_encoding(A, k, Ws[i], bound, gamma, device)
+        t, final_loss, final_lpca_loss, final_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc = lpca_encoding(A, k, Ws[i], bound, gamma, device)
         matrices_norm[f"idx_{i}"] = enc_norm
         matrices[f"idx_{i}"] = enc
 
-        tqdm.write(f"Rec. Error: {error}, Sim Std: {np.mean(d_std)}, Final Loss: {final_loss}, Final LPCA Loss: {final_lpca_loss}, Final Sim Loss: {final_sim_loss}")
+        tqdm.write(f"Rec. Error: {error}, Sim Std: {std_of_y_std(sim_std_list)}, Final Loss: {final_loss}, Final LPCA Loss: {final_lpca_loss}, Final Sim Loss: {final_sim_loss}")
 
         results.append(
             {
@@ -183,8 +181,9 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
                 "nit": nit,
                 "error": error,
                 "time": t,
-                "d_mean": d_mean,
-                "d_std": d_std,
+                "d": d_list,
+                "sim_mean": sim_mean_list,
+                "sim_std": sim_std_list,
             }
         )
 

@@ -8,22 +8,28 @@ import torch
 
 def get_sim_targets(A, enc_method="Dist", eps=1e-1, device=None):
     A = torch.tensor(A).to(device)
-    neighbourhood_diff, neighbourhood_sim, neighbourhood_path3 = compute_neighbourhood_properties(A)
+    neighbourhood_diff, neighbourhood_sim, path3, path4 = compute_neighbourhood_properties(A)
 
     if enc_method == "Dist":
         W = neighbourhood_diff
     elif enc_method == "Sim":
-        W = 10*neighbourhood_sim + neighbourhood_path3
-        w_max = W.max()
+        W = neighbourhood_sim / (neighbourhood_diff + neighbourhood_sim)
+        # boolean = W < 0.01
+        # W_new =  W + torch.abs(torch.randn(W.shape)/10)
+        # W[boolean] = W_new[boolean]
+        # W = W / W.max()
+
+        # W = 4*neighbourhood_sim + 2*path3 + path4
+        # w_max = W.max()
 
         # max over rows: shape (4, 1)
-        row_max = W.max(dim=1, keepdim=True).values
+        # row_max = W.max(dim=1, keepdim=True).values
         # max over columns: shape (1, 5)
-        col_max = W.max(dim=0, keepdim=True).values
+        # col_max = W.max(dim=0, keepdim=True).values
         # for each (i, j): denom[i, j] = max( row_max[i], col_max[j] )
-        denom = torch.maximum(row_max, col_max)
-        W = W / denom
-        W = W * w_max
+        # denom = torch.maximum(row_max, col_max)
+        # W = W / denom
+        # W = W * w_max
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
@@ -31,13 +37,14 @@ def get_sim_targets(A, enc_method="Dist", eps=1e-1, device=None):
     # r_A = torch.linalg.matrix_rank(A.float())
     # r_W = torch.linalg.matrix_rank(W.float())
 
-    return W, neighbourhood_diff, neighbourhood_sim, neighbourhood_path3
+    return W, neighbourhood_diff, neighbourhood_sim, path3
 
 
 def compute_neighbourhood_properties(A):
     A_float = A.float()
-    product = torch.matmul(A_float, A_float)
-    product = torch.matmul(product, A_float)
+    A_pow2 = torch.matmul(A_float, A_float)
+    A_pow3 = torch.matmul(A_pow2, A_float)
+    A_pow4 = torch.matmul(A_pow3, A_float)
 
     A_bool = A.bool()
     xor_all = torch.logical_xor(A_bool[:, None, :], A_bool[None, :, :])  # (n,n,d)
@@ -45,9 +52,8 @@ def compute_neighbourhood_properties(A):
 
     neighbourhood_diff = xor_all.sum(dim=2)
     neighbourhood_sim = and_all.sum(dim=2)
-    neighbourhood_path3 = product
 
-    return neighbourhood_diff, neighbourhood_sim, neighbourhood_path3
+    return neighbourhood_diff, neighbourhood_sim, A_pow3, A_pow4
 
 
 def compute_properties(A, device):

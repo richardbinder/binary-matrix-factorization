@@ -98,7 +98,8 @@ def lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=0.2):
     sim = L_sim + R_sim
     sim = sim.abs()
 
-    W = W / W.max()
+    # W = W.round()
+    # W = W / W.max()
 
     # e = 0.01
     # try:
@@ -115,7 +116,7 @@ def lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=0.2):
     # except AssertionError:
     #     print(W_sim)
 
-    sim_loss = ((sim - W).abs() * weights).mean()
+    sim_loss = ((sim - W).pow(2)).mean()
 
     global count
     if count >= 299:

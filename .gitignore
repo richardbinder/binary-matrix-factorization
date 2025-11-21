@@ -5,5 +5,7 @@ wandb/
 results/
 output/similarity_res/*.parquet
 *.parquet
+.idea/*
+.idea
 
 .venv

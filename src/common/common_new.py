@@ -3,6 +3,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import math
 from torch_geometric.datasets import ZINC, GNNBenchmarkDataset, LRGBDataset
 from src.compute.compute_properties import get_sim_targets
 
@@ -82,44 +83,95 @@ def neighbourhood_symmetric_difference(u_neigh, v_neigh):
     return np.count_nonzero(np.logical_xor(u_bool, v_bool))
 
 
+def pairwise_euclidean(X: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    """
+    X: (n, d) tensor, each row is a d-dim vector.
+    Returns: (n, n) tensor D where D[i, j] = ||X[i] - X[j]||_2
+    """
+    # Gram matrix (dot products)
+    G = X @ X.T                 # (n, n)
+
+    # Squared norms of each row: ||x_i||^2
+    sq_norms = torch.diag(G)            # (n,)
+
+    # Use (x_i - x_j)^2 = ||x_i||^2 + ||x_j||^2 - 2 x_i·x_j
+    dist_sq = sq_norms.unsqueeze(1) + sq_norms.unsqueeze(0) - 2.0 * G
+
+    # Numerical stability: clamp small negatives to 0 before sqrt
+    dist_sq = torch.clamp(dist_sq, min=0.0)
+
+    return torch.sqrt(dist_sq + eps)
+
+
 def measure_encoding_similarity(A, encodings, enc_method="Dist"):
-    """
-    A: adjacency matrix of shape (n, n)
-       - can be numpy array or torch tensor
-    encodings: numpy array of shape (n, d)
-
-    Returns:
-        dict: distance (neighborhood symmetric difference) -> list of encoding distances
-    """
-    # Make sure A is a numpy array
-    if isinstance(A, torch.Tensor):
-        A_np = A.cpu().numpy()
-    else:
-        A_np = np.asarray(A)
-
-    enc_np = np.asarray(encodings)
-
-    similarity = {}
-    n_nodes = A_np.shape[0]
-
     W, _, _, _ = get_sim_targets(A, enc_method=enc_method)
 
-    for v in range(n_nodes):
-        for w in range(v + 1, n_nodes):
-            d = round(W[v][w].item())
+    if enc_method == "Dist":
+        D_sim = pairwise_euclidean(encodings, encodings)
+    elif enc_method == "Sim":
+        D_sim = encodings @ encodings.T
+    else:
+        raise ValueError("Unknown encoding method")
 
-            if d not in similarity:
-                similarity[d] = []
-            if enc_method == "Dist":
-                d_sim = np.linalg.norm(enc_np[v] - enc_np[w])
-            elif enc_method == "Sim":
-                d_sim = np.abs(np.linalg.vecdot(enc_np[v], enc_np[w]))
-            else:
-                raise ValueError("Unknown method")
+    sim_pairs = [(d, s) for d, s in zip(D_sim.flatten(), W.flatten())]
 
-            similarity[d].append(d_sim)
+    return sim_pairs
 
-    return similarity
+
+def bin_and_stats(XY):
+    """
+    XY: list of (x, y) pairs, with x roughly in [0, 1].
+    Returns:
+      L: list of 20 lists, each containing the (x, y) pairs in that bin
+      stats: list of 20 triples (x_k, y_mean, y_std)
+             where x_k is the bin center.
+    """
+    n_bins = 20
+    bin_width = 1.0 / n_bins
+
+    # 1) Collect pairs into bins
+    L = [[] for _ in range(n_bins)]
+
+    for x, y in XY:
+        if x < 0 or x > 1:
+            continue  # skip out-of-range; adjust if you want different behavior
+
+        # Map x to bin index k
+        k = int(x / bin_width)
+        if k == n_bins:  # catch edge case x == 1.0
+            k = n_bins - 1
+        L[k].append((x, y))
+
+    # 2) Compute stats per bin
+    x_list = []
+    y_mean_list = []
+    y_std_list = []
+    for k in range(n_bins):
+        bin_pairs = L[k]
+        x_k = (k + 0.5) * bin_width  # bin center; use k*bin_width for left edge if preferred
+
+        if bin_pairs:
+            ys = np.array([y for _, y in bin_pairs])
+            y_mean = float(ys.mean())
+            y_std = float(ys.std(ddof=0))  # population std; use ddof=1 for sample std
+        else:
+            y_mean = math.nan
+            y_std = math.nan
+
+        x_list.append(x_k)
+        y_mean_list.append(y_mean)
+        y_std_list.append(y_std)
+
+    return x_list, y_mean_list, y_std_list
+
+
+def std_of_y_std(stats):
+    """
+    stats: output of bin_and_stats (list of dicts with key 'y_std')
+    Returns: std of all finite y_std values.
+    """
+    y_stds = [s for s in stats if not math.isnan(s)]
+    return float(np.std(y_stds, ddof=0))  # use ddof=1 for sample std
 
 
 def load_dataset(name):
