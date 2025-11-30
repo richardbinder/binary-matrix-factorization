@@ -1,4 +1,4 @@
-from src.common.common import measure_encoding_similarity, construct_adjacency_matrix, load_dataset
+from common import measure_encoding_similarity, construct_adjacency_matrix, load_dataset
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -63,4 +63,4 @@ if __name__ == "__main__":
                     }
                 )
     
-    pd.DataFrame(results).to_parquet("output/similarity_res/similarity_" + file_name + '.parquet')
+    pd.DataFrame(results).to_parquet("similarity_res/similarity_" + file_name + '.parquet')

@@ -1,8 +1,8 @@
 import time
-
+import torch
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
+import pandas as pd
 from torch_geometric.datasets import ZINC, GNNBenchmarkDataset, LRGBDataset
 
 

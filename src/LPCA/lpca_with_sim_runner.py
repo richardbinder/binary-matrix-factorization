@@ -1,12 +1,10 @@
-import sys
-
 import numpy as np
 import pandas as pd
 import scipy as sp
 from tqdm import tqdm
-
-from src.LPCA.lpca_with_sim import lpca_encoding
-from src.common.common import construct_adjacency_matrix, load_dataset
+import sys
+from common import construct_adjacency_matrix, load_dataset
+from lpca_with_sim import lpca_encoding
 
 
 def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None):
@@ -20,7 +18,7 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None):
         t, error, d_mean, d_std, nit, enc = lpca_encoding(A, k, bound, gamma)
         matrices[f"idx_{i}"] = enc
 
-        tqdm.write(f"Error: {error}")
+        print(error)
 
         results.append(
             {

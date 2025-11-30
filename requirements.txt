@@ -4,4 +4,3 @@ matplotlib==3.10.0
 pandas==2.2.3
 pyarrow==19.0.0
 wandb==0.19.7
-plotly==6.4.0
