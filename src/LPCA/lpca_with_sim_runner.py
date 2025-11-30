@@ -3,8 +3,8 @@ import pandas as pd
 import scipy as sp
 from tqdm import tqdm
 import sys
-from common import construct_adjacency_matrix, load_dataset
-from lpca_with_sim import lpca_encoding
+from src.common import construct_adjacency_matrix, load_dataset
+from src.LPCA.lpca_with_sim import lpca_encoding
 
 
 def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None):
