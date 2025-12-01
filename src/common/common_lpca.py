@@ -104,11 +104,13 @@ def pairwise_euclidean(X: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
 
 
 def measure_encoding_similarity(A, encodings, enc_method="Dist"):
-    W, _, _, _ = get_sim_targets(A, enc_method=enc_method)
+    W = get_sim_targets(A, enc_method=enc_method)
 
     if enc_method == "Dist":
         D_sim = pairwise_euclidean(encodings, encodings)
     elif enc_method == "Sim":
+        D_sim = encodings @ encodings.T
+    elif enc_method == "SimDegree":
         D_sim = encodings @ encodings.T
     else:
         raise ValueError("Unknown encoding method")

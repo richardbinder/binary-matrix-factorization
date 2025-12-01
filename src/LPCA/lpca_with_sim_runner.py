@@ -112,6 +112,8 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
         loss_fnc = lambda: lpca_dist_loss(L, R, adj_s, W, weights, params, gamma=gamma)
     elif enc_method == "Sim":
         loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=gamma)
+    elif enc_method == "SimDegree":
+        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=gamma)
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
@@ -159,7 +161,7 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
     Ws = []
     for i in tqdm(range(idx_max)):
         A = construct_adjacency_matrix(data[i])
-        W, _, _, _ = get_sim_targets(A, enc_method, device=device)
+        W = get_sim_targets(A, enc_method, device=device)
         Ws.append(W)
 
     tqdm.write("\n")
