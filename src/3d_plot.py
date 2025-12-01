@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.datasets import LRGBDataset
 from torch_geometric.utils import to_networkx
-from src.common.common_new import load_dataset
+from src.common.common_lpca import load_dataset
 
 import networkx as nx
 import plotly.graph_objects as go
