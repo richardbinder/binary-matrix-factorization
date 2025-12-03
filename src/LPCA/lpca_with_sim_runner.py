@@ -95,14 +95,24 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
 
     optimizer = torch.optim.Adam(
         [L, R],
-        lr=5e-1
+        lr=5e-1,
+        eps=1e-8,
+        betas=(0.9, 0.999),
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=30,       # first restart after 5 epochs
+        T_mult=1,    # 5, 10, 20, ...
+        eta_min=1e-5 # minimum lr
     )
 
-    counts = torch.bincount(W.int().flatten(), minlength=11)
+    # counts = torch.bincount(W.int().flatten(), minlength=11)
     # Replace each value with its count
-    weights = 1 / counts[W.int()]
-    weights = torch.sqrt(weights)
-    weights = weights / weights.mean()
+    # weights = 1 / counts[W.int()]
+    # weights = torch.sqrt(weights)
+    # weights = weights / weights.mean()
+    # temporary fix
+    weights = W
 
     final_loss = 0
     final_lpca_loss = 0
@@ -117,10 +127,11 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    for _ in range(300):
+    for epoch in range(1000):
         handle_bound_fnc = lambda: handle_bound(L, R, bound)
         final_loss, final_lpca_loss, final_sim_loss = closure(optimizer, handle_bound_fnc, loss_fnc)
         optimizer.step()
+        scheduler.step(epoch)
 
     # optimizer.step(closure)
 

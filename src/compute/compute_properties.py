@@ -80,33 +80,15 @@ def get_sim_targets(A, enc_method="Dist", device=None):
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    # G2 = cosine_similarity(G, G)
-    # G3 = cosine_similarity(G2, G)
-    # G4 = cosine_similarity(G3, G)
-    # G5 = cosine_similarity(G4, G)
-    # G6 = cosine_similarity(G5, G)
-    #
     # r_D = torch.linalg.matrix_rank(neighbourhood_diff.float())
     # r_S = torch.linalg.matrix_rank(neighbourhood_sim.float())
     # r_A = torch.linalg.matrix_rank(A.float())
     # r_W = torch.linalg.matrix_rank(W.float())
-    # r_G = torch.linalg.matrix_rank(G)
-    # r_G2 = torch.linalg.matrix_rank(G2)
-    # r_G3 = torch.linalg.matrix_rank(G3)
-    # r_G4 = torch.linalg.matrix_rank(G4)
-    # r_G5 = torch.linalg.matrix_rank(G5)
-    # r_G6 = torch.linalg.matrix_rank(G6)
     #
     # rs_D = stable_rank(neighbourhood_diff.float())
     # rs_S = stable_rank(neighbourhood_sim.float())
     # rs_A = stable_rank(A)
     # rs_W = stable_rank(W)
-    # rs_G = stable_rank(G)
-    # rs_G2 = stable_rank(G2)
-    # rs_G3 = stable_rank(G3)
-    # rs_G4 = stable_rank(G4)
-    # rs_G5 = stable_rank(G5)
-    # rs_G6 = stable_rank(G6)
 
     return W
 

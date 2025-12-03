@@ -94,7 +94,7 @@ def lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=0.2):
     R = R/norms.T
 
     L_sim = pairwise_dot_products(L)              # (n, n)
-    R_sim = pairwise_dot_products(R.t())          # (n, n)
+    R_sim = pairwise_dot_products(R.T)          # (n, n)
     sim = L_sim + R_sim
     sim = sim.abs()
 

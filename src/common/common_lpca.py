@@ -135,7 +135,7 @@ def bin_and_stats(XY):
     L = [[] for _ in range(n_bins)]
 
     for x, y in XY:
-        if x < 0 or x > 1:
+        if x < 0 or x > 1 or math.isnan(x):
             continue  # skip out-of-range; adjust if you want different behavior
 
         # Map x to bin index k
