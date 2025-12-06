@@ -134,14 +134,16 @@ def get_degree_similarity(A):
 def get_sim_targets(A, enc_method="Dist", device=None):
     A = torch.tensor(A).to(device)
 
-    if enc_method == "Dist":
+    if enc_method == "None":
+        W = torch.zeros(A.shape)
+    elif enc_method == "Dist":
         W = get_neighbourhood_diff
     elif enc_method == "Sim":
         W = get_jaccard_index(A)
     elif enc_method == "SimDegree":
         W = get_degree_similarity(A)
     elif enc_method == "SimPaths":
-        W = get_path_probabilities(A)
+        W = get_path_probabilities_reduce_error(A)
     else:
         raise ValueError(f"Unknown method {enc_method}")
 

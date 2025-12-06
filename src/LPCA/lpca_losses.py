@@ -19,6 +19,30 @@ def pairwise_dot_products(X: torch.Tensor) -> torch.Tensor:
     """
     return X @ X.T
 
+def lpca_loss(L, R, adj_s):
+    """
+    L: (n, k) torch tensor
+    R: (k, n) torch tensor
+    adj_s: (n, n) torch tensor with entries in {-1, +1}
+    W: (n, n) torch tensor with neighborhood dissimilarities (>= 0)
+    gamma: float
+
+    returns: scalar loss tensor
+    """
+
+    # LPCA part
+    logits = L @ R  # (n, n)
+    neg_logits_y = -logits * adj_s  # (n, n)
+
+    # log(1 + exp(-y f(x))) = logaddexp(0, -y f(x))
+    lpca_loss = torch.logaddexp(
+        torch.zeros_like(neg_logits_y),
+        neg_logits_y
+    ).mean()
+
+    return lpca_loss, lpca_loss, 0
+
+
 def lpca_dist_loss(L, R, adj_s, W, weights, params, gamma=0.2):
     """
     L: (n, k) torch tensor

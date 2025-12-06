@@ -104,9 +104,9 @@ def pairwise_euclidean(X: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
 
 
 def measure_encoding_similarity(A, encodings, enc_method="Dist"):
-    W = get_sim_targets(A, enc_method=enc_method)
-
-    if enc_method == "Dist":
+    if enc_method == "None":
+        D_sim = torch.zeros(A.shape)
+    elif enc_method == "Dist":
         D_sim = pairwise_euclidean(encodings, encodings)
     elif enc_method == "Sim":
         D_sim = encodings @ encodings.T
@@ -115,9 +115,7 @@ def measure_encoding_similarity(A, encodings, enc_method="Dist"):
     else:
         raise ValueError("Unknown encoding method")
 
-    sim_pairs = [(d, s) for d, s in zip(D_sim.flatten(), W.flatten())]
-
-    return sim_pairs
+    return D_sim
 
 
 def bin_and_stats(XY):
@@ -167,13 +165,80 @@ def bin_and_stats(XY):
     return x_list, y_mean_list, y_std_list
 
 
+def bin_and_stats_torch(X: torch.Tensor,
+                        Y: torch.Tensor,
+                        n_bins: int = 20):
+    """
+    X, Y: PyTorch tensors of the same shape, representing x and y values.
+          x is assumed roughly in [0, 1].
+          They can be any shape; they will be flattened.
+
+    Returns (all as 1D tensors on the same device as X/Y):
+      bin_centers: shape [n_bins]
+      y_mean:      shape [n_bins]
+      y_std:       shape [n_bins]
+    """
+    if X.shape != Y.shape:
+        raise ValueError(f"X and Y must have the same shape, got {X.shape} vs {Y.shape}")
+
+    device = X.device
+    dtype = Y.dtype
+
+    # Flatten
+    x = X.reshape(-1)
+    y = Y.reshape(-1)
+
+    # Mask out invalid x (out of range or NaN)
+    valid = (x >= 0) & (x <= 1) & (~torch.isnan(x))
+    x = x[valid]
+    y = y[valid]
+
+    if x.numel() == 0:
+        # No valid data: return NaNs everywhere
+        bin_centers = (torch.arange(n_bins, device=device, dtype=X.dtype) + 0.5) / n_bins
+        nan = torch.full((n_bins,), float('nan'), device=device, dtype=dtype)
+        return bin_centers, nan, nan
+
+    # Map x to bin index k in [0, n_bins-1]
+    # Equivalent to int(x / bin_width) with bin_width = 1.0 / n_bins
+    # but cheaper and more numerically stable:
+    k = (x * n_bins).long()
+    k.clamp_(0, n_bins - 1)
+
+    # Prepare accumulators
+    y_sum = torch.zeros(n_bins, device=device, dtype=dtype)
+    y_sq_sum = torch.zeros(n_bins, device=device, dtype=dtype)
+    counts = torch.zeros(n_bins, device=device, dtype=torch.long)
+
+    # Sum y, y^2 and counts per bin using scatter_add_
+    y_sum.scatter_add_(0, k, y)
+    y_sq_sum.scatter_add_(0, k, y * y)
+    counts.scatter_add_(0, k, torch.ones_like(k, dtype=torch.long))
+
+    # Compute mean and std (population std, ddof=0)
+    counts_float = counts.clamp(min=1).to(dtype)
+    y_mean = y_sum / counts_float
+    var = y_sq_sum / counts_float - y_mean ** 2
+    var.clamp_(min=0)  # numerical safety
+    y_std = torch.sqrt(var)
+
+    # Set NaN where there were no elements in the bin
+    empty = counts == 0
+    y_mean = y_mean.masked_fill(empty, float('nan'))
+    y_std = y_std.masked_fill(empty, float('nan'))
+
+    # Bin centers
+    bin_centers = (torch.arange(n_bins, device=device, dtype=X.dtype) + 0.5) / n_bins
+
+    return bin_centers, y_mean, y_std
+
+
 def std_of_y_std(stats):
     """
     stats: output of bin_and_stats (list of dicts with key 'y_std')
     Returns: std of all finite y_std values.
     """
-    y_stds = [s for s in stats if not math.isnan(s)]
-    return float(np.std(y_stds, ddof=0))  # use ddof=1 for sample std
+    return torch.nanmean(stats)
 
 
 def load_dataset(name):
