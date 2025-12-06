@@ -119,7 +119,7 @@ def lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=0.2):
     sim_loss = ((sim - W).pow(2)).mean()
 
     global count
-    if count >= 299:
+    if count >= 999:
         count = 0
     else:
         count += 1

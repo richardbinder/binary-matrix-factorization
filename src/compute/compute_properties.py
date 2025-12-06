@@ -12,12 +12,49 @@ def singular_values(A: torch.Tensor) -> torch.Tensor:
     return torch.linalg.svdvals(A)  # sorted desc
 
 
+def best_low_rank_approx_error(A: torch.Tensor, rank) -> float:
+    """
+    Returns the best possible relative low rank approximation error of the given rank for matrix A,
+    i.e. sqrt( sum_{i>rank} s_i^2 ) / ||A||_F
+    The return value is between 0 and 1, where 0 is the best and 1 the worst
+    Best possible refers to min_{rank(B) <= rank} ||A-B||_F
+    """
+    A = A.double()
+    s = singular_values(A)
+    min_Frobenius = s[rank:].pow(2).sum().pow(1/2)
+    min_Frobenius_normed = min_Frobenius / (torch.linalg.norm(A) + 1e-12)
+    return min_Frobenius_normed
+
+
 def stable_rank(A: torch.Tensor) -> float:
     """
     srank(A) = ||A||_F^2 / ||A||_2^2 = sum s_i^2 / s_1^2
     """
     s = singular_values(A)
     return float((s.pow(2).sum() / (s[0]**2)).item())
+
+
+def stable_rank_cut(A: torch.Tensor, rank) -> float:
+    """
+    srank(A) = ||A||_F^2 / ||A||_2^2 = sum s_i^2 / s_1^2
+    """
+    s = singular_values(A)[1:rank-1]
+    return float((s.pow(2).sum() / (s[1]**2)).item())
+
+
+def stable_rank_cut_rel(A: torch.Tensor, rank) -> float:
+    """
+    srank(A) = ||A||_F^2 / ||A||_2^2 = sum s_i^2 / s_1^2
+    """
+    return stable_rank_cut(A, rank)/rank
+
+
+def stable_rank_relative(A: torch.Tensor, rank) -> float:
+    return stable_rank(A)/rank
+
+
+def similarity_metric_quality(A: torch.Tensor, rank) -> float:
+    return stable_rank_relative(A, rank) - best_low_rank_approx_error(A, rank)
 
 
 def cosine_similarity(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
@@ -43,12 +80,38 @@ def get_neighbourhood_sim(A):
     return neighbourhood_sim
 
 
-def get_paths(A, length):
+def get_path_counts(A, length):
     length -= 1
     A = A.float()
     A_paths = A
     for i in range(length):
         A_paths = A_paths @ A
+    return A_paths
+
+
+def get_path_probabilities(A, length):
+    length -= 1
+    A = A.float()
+    A = A / A.sum(dim=1)
+    A = A.T
+    A_paths = get_path_counts(A, length)
+    return A_paths
+
+
+def get_path_probabilities_reduce_error(A):
+    A = A.float()
+    A = A / A.sum(dim=1)
+    A = A.T
+    path_length = 20
+    A_paths_20 = get_path_counts(A, path_length)
+    A_paths = A_paths_20
+    i = 0
+    while best_low_rank_approx_error(A_paths, 24) > 0.01:
+        A_paths = A_paths @ A_paths_20
+        i += 1
+    final_path_length = path_length * i
+
+    print("Path length:", final_path_length)
     return A_paths
 
 
@@ -77,41 +140,123 @@ def get_sim_targets(A, enc_method="Dist", device=None):
         W = get_jaccard_index(A)
     elif enc_method == "SimDegree":
         W = get_degree_similarity(A)
+    elif enc_method == "SimPaths":
+        W = get_path_probabilities(A)
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    # r_D = torch.linalg.matrix_rank(neighbourhood_diff.float())
-    # r_S = torch.linalg.matrix_rank(neighbourhood_sim.float())
-    # r_A = torch.linalg.matrix_rank(A.float())
-    # r_W = torch.linalg.matrix_rank(W.float())
-    #
-    # rs_D = stable_rank(neighbourhood_diff.float())
-    # rs_S = stable_rank(neighbourhood_sim.float())
-    # rs_A = stable_rank(A)
-    # rs_W = stable_rank(W)
-
     return W
 
+class properties:
+    def __init__(self, A, device):
+        self.device = device
+        self.A = torch.tensor(A).to(device)
 
-def compute_properties(A, device):
-    A = torch.tensor(A).to(device)
+        self.jaccard_index = None
+        self.degree_similarity = None
+        self.neighbourhood_sim = None
+        self.neighbourhood_diff = None
+        self.paths_count = None
+        self.paths_probabilities = None
 
-    jaccard_index = get_jaccard_index(A)
-    degree_similarity = get_degree_similarity(A)
-    neighbourhood_sim = get_neighbourhood_sim(A)
-    neighbourhood_diff = get_neighbourhood_diff(A)
-    paths_3 = get_paths(A, 3)
+        self.jaccard_index_flat = None
+        self.degree_similarity_flat = None
+        self.neighbourhood_diff_flat = None
+        self.neighbourhood_sim_flat = None
+        self.paths_count_flat = None
+        self.paths_probabilities_flat = None
 
-    # upper-triangular indices
-    idx = torch.triu_indices(A.shape[0], A.shape[0], offset=1)
+        self.jaccard_index_rank = None
+        self.degree_similarity_rank = None
+        self.neighbourhood_diff_rank = None
+        self.neighbourhood_sim_rank = None
+        self.paths_count_rank = None
+        self.paths_probabilities_rank = None
 
-    jaccard_index = jaccard_index[idx[0], idx[1]].cpu().numpy()
-    degree_similarity = degree_similarity[idx[0], idx[1]].cpu().numpy()
-    neighbourhood_diff = neighbourhood_diff[idx[0], idx[1]].cpu().numpy()
-    neighbourhood_sim = neighbourhood_sim[idx[0], idx[1]].cpu().numpy()
-    paths_3 = paths_3[idx[0], idx[1]].cpu().numpy()
+        self.jaccard_index_stable_rank = None
+        self.degree_similarity_stable_rank = None
+        self.neighbourhood_diff_stable_rank = None
+        self.neighbourhood_sim_stable_rank = None
+        self.paths_count_stable_rank = None
+        self.paths_probabilities_stable_rank = None
 
-    return jaccard_index, degree_similarity, neighbourhood_sim, neighbourhood_diff, paths_3
+        self.jaccard_index_min_error = None
+        self.degree_similarity_min_error = None
+        self.neighbourhood_diff_min_error = None
+        self.neighbourhood_sim_min_error = None
+        self.paths_count_min_error = None
+        self.paths_probabilities_min_error = None
+
+
+    def compute(self):
+        self.jaccard_index = get_jaccard_index(self.A).double()
+        self.degree_similarity = get_degree_similarity(self.A).double()
+        self.neighbourhood_sim = get_neighbourhood_sim(self.A).double()
+        self.neighbourhood_diff = get_neighbourhood_diff(self.A).double()
+
+        # upper-triangular indices
+        idx = torch.triu_indices(self.A.shape[0], self.A.shape[0], offset=1)
+
+        self.jaccard_index_flat = self.jaccard_index[idx[0], idx[1]].cpu().numpy()
+        self.degree_similarity_flat = self.degree_similarity[idx[0], idx[1]].cpu().numpy()
+        self.neighbourhood_diff_flat = self.neighbourhood_diff[idx[0], idx[1]].cpu().numpy()
+        self.neighbourhood_sim_flat = self.neighbourhood_sim[idx[0], idx[1]].cpu().numpy()
+
+        self.jaccard_index_rank = torch.linalg.matrix_rank(self.jaccard_index)
+        self.degree_similarity_rank = torch.linalg.matrix_rank(self.degree_similarity)
+        self.neighbourhood_diff_rank = torch.linalg.matrix_rank(self.neighbourhood_diff)
+        self.neighbourhood_sim_rank = torch.linalg.matrix_rank(self.neighbourhood_sim)
+
+        self.jaccard_index_stable_rank = stable_rank(self.jaccard_index)
+        self.degree_similarity_stable_rank = stable_rank(self.degree_similarity)
+        self.neighbourhood_diff_stable_rank = stable_rank(self.neighbourhood_diff)
+        self.neighbourhood_sim_stable_rank = stable_rank(self.neighbourhood_sim)
+
+        rank = 12
+
+        self.jaccard_index_min_error = best_low_rank_approx_error(self.jaccard_index, rank=rank)
+        self.degree_similarity_min_error = best_low_rank_approx_error(self.degree_similarity, rank=rank)
+        self.neighbourhood_diff_min_error = best_low_rank_approx_error(self.neighbourhood_diff, rank=rank)
+        self.neighbourhood_sim_min_error = best_low_rank_approx_error(self.neighbourhood_sim, rank=rank)
+
+    def compute_paths_count(self, length, rank):
+        self.paths_count = None
+        self.paths_count = get_path_counts(self.A, length).double()
+        # upper-triangular indices
+        idx = torch.triu_indices(self.A.shape[0], self.A.shape[0], offset=1)
+        self.paths_count_flat =self.paths_count[idx[0], idx[1]].cpu().numpy()
+        self.paths_count_rank = torch.linalg.matrix_rank(self.paths_count)
+        self.paths_count_stable_rank = stable_rank(self.paths_count)
+        self.paths_count_min_error = best_low_rank_approx_error(self.paths_count, rank=rank)
+        print(f"Paths count, Rank: {self.paths_count_rank}, Stable rank: {self.paths_count_stable_rank}, Min error: {self.paths_count_min_error}")
+        test = 0
+
+    def compute_paths_probabilities(self, length, rank):
+        self.paths_probabilities = None
+        self.paths_probabilities = get_path_probabilities(self.A, length).double()
+        self.paths_probabilities = (self.paths_probabilities * self.paths_probabilities.T).pow(1/2)
+        # upper-triangular indices
+        idx = torch.triu_indices(self.A.shape[0], self.A.shape[0], offset=1)
+        self.paths_probabilities_flat =self.paths_probabilities[idx[0], idx[1]].cpu().numpy()
+        self.paths_probabilities_rank = torch.linalg.matrix_rank(self.paths_probabilities)
+        self.paths_probabilities_stable_rank = stable_rank(self.paths_probabilities)
+        self.paths_probabilities_min_error = best_low_rank_approx_error(self.paths_probabilities, rank=rank)
+        print(f"Paths probabilities, Rank: {self.paths_probabilities_rank}, Stable rank: {self.paths_probabilities_stable_rank}, Min error: {self.paths_probabilities_min_error}")
+        test = 0
+
+    def compute_paths_probabilities_optimize(self, rank):
+        self.paths_probabilities = None
+        self.paths_probabilities = get_path_probabilities_reduce_error(self.A).double()
+        self.paths_probabilities = (self.paths_probabilities * self.paths_probabilities.T).pow(1/2)
+        # upper-triangular indices
+        idx = torch.triu_indices(self.A.shape[0], self.A.shape[0], offset=1)
+        self.paths_probabilities_flat =self.paths_probabilities[idx[0], idx[1]].cpu().numpy()
+        self.paths_probabilities_rank = torch.linalg.matrix_rank(self.paths_probabilities)
+        self.paths_probabilities_stable_rank = stable_rank(self.paths_probabilities)
+        self.paths_probabilities_min_error = best_low_rank_approx_error(self.paths_probabilities, rank=rank)
+        print(f"Optimized probabilities, Rank: {self.paths_probabilities_rank}, Stable rank: {self.paths_probabilities_stable_rank}, Min error: {self.paths_probabilities_min_error}")
+        test = 0
+
 
 if __name__ == "__main__":
     dataset_name = sys.argv[1]
@@ -119,20 +264,30 @@ if __name__ == "__main__":
     data = load_dataset(dataset_name)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
     results = []
     for i in tqdm(range(len(data))):
         A = construct_adjacency_matrix(data[i])
-        jaccard_index, degree_similarity, neighbourhood_sim, neighbourhood_diff, paths_3 = compute_properties(A, device)
+        p = properties(A, device)
+        p.compute()
+
+        path_length = 20
+        # print(f"\nPath length = {path_length}")
+        p.compute_paths_count(path_length, 24)
+        p.compute_paths_probabilities(path_length, 24)
+        p.compute_paths_probabilities_optimize(path_length)
+        print(p.paths_probabilities)
+        print("\n")
 
         results.append(
             {
                 "graph_id": i,
-                "neighbourhood_diff": neighbourhood_diff,
-                "neighbourhood_sim": neighbourhood_sim,
-                "paths_3": paths_3,
-                "jaccard_index": jaccard_index,
-                "degree_similarity": degree_similarity
+                "neighbourhood_diff_flat": p.neighbourhood_diff_flat,
+                "neighbourhood_sim_flat": p.neighbourhood_sim_flat,
+                "paths_count_flat": p.paths_count_flat,
+                "jaccard_index_flat": p.jaccard_index_flat,
+                "degree_similarity_flat": p.degree_similarity_flat
             }
         )
 
