@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-from src.compute.compute_properties import get_sim_targets
-from src.LPCA.lpca_losses import lpca_dist_loss, lpca_sim_loss, lpca_loss
+from src.compute.compute_properties import get_sim_targets, best_low_rank_approx_error
+from src.LPCA.lpca_losses import lpca_dist_loss, lpca_sim_loss_params, lpca_loss, lpca_p_loss, lpca_sim_loss
 
 from src.common.common_lpca import (
     construct_adjacency_matrix,
@@ -14,9 +14,9 @@ from src.common.common_lpca import (
     time_wrapper,
     measure_encoding_similarity,
     bin_and_stats,
-    std_of_y_std, bin_and_stats_torch
+    mean_of_y_std, bin_and_stats_torch
 )
-
+from src.compute.svd import psd_factor_svd
 
 enc_method = "Dist"
 
@@ -76,13 +76,17 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     adj_s = -1.0 + 2.0 * A  # (n, n), in {-1, +1}
 
     # Initialize factors L, R in [-1, 1]
-    L = torch.empty((n, k), device=device).uniform_(-1.0, 1.0)
-    R = torch.empty((k, n), device=device).uniform_(-1.0, 1.0)
+    # L = torch.empty((n, k), device=device).uniform_(-1.0, 1.0)
+    # R = torch.empty((k, n), device=device).uniform_(-1.0, 1.0)
+
+    X = psd_factor_svd(W, k=k * 2)
+    L = X[:, :k]
+    R = X[:, k:].T
 
     L.requires_grad_(True)
     R.requires_grad_(True)
 
-    params = torch.empty(3, device=device).uniform_(-1.0, 1.0)
+    params = torch.empty_like(A).uniform_(-1.0, 1.0)
     params.requires_grad_(True)
 
     # optimizer = torch.optim.LBFGS(
@@ -91,17 +95,17 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     #     line_search_fn="strong_wolfe",
     # )
 
-    optimizer = torch.optim.Adam(
-        [L, R],
+    optimizer = torch.optim.AdamW(
+        [L, R, params],
         lr=5e-1,
         eps=1e-8,
         betas=(0.9, 0.999),
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=30,       # first restart after 5 epochs
+        T_0=20,       # first restart after 5 epochs
         T_mult=1,    # 5, 10, 20, ...
-        eta_min=1e-5 # minimum lr
+        eta_min=1e-4 # minimum lr
     )
 
     # not used
@@ -116,13 +120,15 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     elif enc_method == "Dist":
         loss_fnc = lambda: lpca_dist_loss(L, R, adj_s, W, weights, params, gamma=gamma)
     elif enc_method == "Sim":
-        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=gamma)
+        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, gamma=gamma)
     elif enc_method == "SimDegree":
-        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, weights, params, gamma=gamma)
+        loss_fnc = lambda: lpca_sim_loss(L, R, adj_s, W, gamma=gamma)
+    elif enc_method == "SimPaths":
+        loss_fnc = lambda: lpca_sim_loss_params(L, R, adj_s, W, params, gamma=gamma)
     else:
         raise ValueError(f"Unknown method {enc_method}")
 
-    for epoch in range(200):
+    for epoch in range(100):
         handle_bound_fnc = lambda: handle_bound(L, R, bound)
         final_loss, final_lpca_loss, final_sim_loss = closure(optimizer, handle_bound_fnc, loss_fnc)
         optimizer.step()
@@ -154,7 +160,9 @@ def lpca_encoding(A, k, W, bound=None, gamma=0.5, device=None):
     sim_pairs = measure_encoding_similarity(A, enc_norm, enc_method)
     d_list, sim_mean_list, sim_std_list = bin_and_stats_torch(sim_pairs, W)
 
-    return final_loss, final_lpca_loss, final_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc
+    best_possible_sim_loss = best_low_rank_approx_error(W, rank=k*2)
+
+    return final_loss, final_lpca_loss, final_sim_loss, best_possible_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc
 
 
 def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, device=None):
@@ -176,9 +184,14 @@ def compute_encodings(data, k, out_path, bound=None, gamma=0.5, n_samples=None, 
         # Now returns a dense torch tensor adjacency
         A = construct_adjacency_matrix(data[i])
 
-        t, final_loss, final_lpca_loss, final_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc = lpca_encoding(A, k, Ws[i], bound, gamma, device)
+        t, final_loss, final_lpca_loss, final_sim_loss, best_possible_sim_loss, error, d_list, sim_mean_list, sim_std_list, nit, enc_norm, enc = lpca_encoding(A, k, Ws[i], bound, gamma, device)
 
-        tqdm.write(f"Rec. Error: {error}, Sim Std: {std_of_y_std(sim_std_list)}, Final Loss: {final_loss}, Final LPCA Loss: {final_lpca_loss}, Final Sim Loss: {final_sim_loss}")
+        tqdm.write(f"Rec. Error: {error:.2e}, "
+                   f"Sim mean std: {mean_of_y_std(sim_std_list):.2e}, "
+                   f"Final Loss: {final_loss:.2e}, "
+                   f"Final LPCA Loss: {final_lpca_loss:.2e}, "
+                   f"Final Sim Loss: {final_sim_loss:.2e}, "
+                   f"Best possible Sim Loss: {best_possible_sim_loss:.2e}")
 
         results.append(
             {
@@ -227,6 +240,6 @@ if __name__ == "__main__":
 
     out_path = f"lpca_out/lpca_with_sim_new_{name}_method{enc_method}_k{k}_b{bound}_gamma{gamma}_s{n_samples}"
 
-    compute_encodings(data, k, out_path, bound, gamma, n_samples, "cuda")
+    compute_encodings(data, k, out_path, bound, gamma, n_samples, "cpu")
 
     print("computed encodings:", out_path)

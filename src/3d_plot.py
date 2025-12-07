@@ -82,7 +82,7 @@ def main():
     print("Number of graphs:", len(dataset))
 
     # Pick any graph, e.g. index 0
-    g = dataset[0]
+    g = dataset[449]
     print(g)
 
     fig = graph_to_3d_fig(g, title="Peptides-func – graph 0 (3D spring layout)")

@@ -112,6 +112,8 @@ def measure_encoding_similarity(A, encodings, enc_method="Dist"):
         D_sim = encodings @ encodings.T
     elif enc_method == "SimDegree":
         D_sim = encodings @ encodings.T
+    elif enc_method == "SimPaths":
+        D_sim = encodings @ encodings.T
     else:
         raise ValueError("Unknown encoding method")
 
@@ -233,7 +235,7 @@ def bin_and_stats_torch(X: torch.Tensor,
     return bin_centers, y_mean, y_std
 
 
-def std_of_y_std(stats):
+def mean_of_y_std(stats):
     """
     stats: output of bin_and_stats (list of dicts with key 'y_std')
     Returns: std of all finite y_std values.
