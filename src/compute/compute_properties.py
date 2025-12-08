@@ -127,6 +127,15 @@ def get_path_similarity(A, length_min, length_max):
     return sim
 
 
+def get_path_distance(A, length_min, length_max):
+    p_concat = torch.zeros((A.shape[0], length_max - length_min + 1)).to(A.device)
+    for i in range(length_min, length_max+1):
+        p = get_path_probabilities(A, i)
+        p = p.sum(dim=0)
+        p_concat[:, i-length_min] = p
+    return p_concat
+
+
 def get_path_probabilities_mean(A, length_min, length_max):
     p_sum = torch.zeros(A.shape).to(A.device)
     for i in range(length_min, length_max+1):
@@ -185,6 +194,7 @@ class properties:
         self.paths_count = None
         self.paths_probabilities = None
         self.paths_similarity = None
+        self.paths_distance = None
 
         self.jaccard_index_flat = None
         self.degree_similarity_flat = None
@@ -193,6 +203,7 @@ class properties:
         self.paths_count_flat = None
         self.paths_probabilities_flat = None
         self.paths_similarity_flat = None
+        self.paths_distance_flat = None
 
         self.jaccard_index_rank = None
         self.degree_similarity_rank = None
@@ -201,6 +212,7 @@ class properties:
         self.paths_count_rank = None
         self.paths_probabilities_rank = None
         self.paths_similarity_rank = None
+        self.paths_distance_rank = None
 
         self.jaccard_index_stable_rank = None
         self.degree_similarity_stable_rank = None
@@ -209,6 +221,7 @@ class properties:
         self.paths_count_stable_rank = None
         self.paths_probabilities_stable_rank = None
         self.paths_similarity_stable_rank = None
+        self.paths_distance_stable_rank = None
 
         self.jaccard_index_min_error = None
         self.degree_similarity_min_error = None
@@ -217,6 +230,7 @@ class properties:
         self.paths_count_min_error = None
         self.paths_probabilities_min_error = None
         self.paths_similarity_min_error = None
+        self.paths_distance_min_error = None
 
 
     def compute(self):
@@ -295,6 +309,17 @@ class properties:
         self.paths_similarity_min_error = best_low_rank_approx_error(self.paths_similarity, rank=rank)
         print(f"Paths similarity, Rank: {self.paths_similarity_rank}, Stable rank: {self.paths_similarity_stable_rank}, Min error: {self.paths_similarity_min_error}")
 
+    def compute_paths_distance(self, length_min, length_max, rank):
+        self.paths_distance = None
+        self.paths_distance = get_path_distance(self.A, length_min, length_max).double()
+        # upper-triangular indices
+        idx = torch.triu_indices(self.A.shape[0], self.A.shape[0], offset=1)
+        self.paths_distance_flat =self.paths_distance[idx[0], idx[1]].cpu().numpy()
+        self.paths_distance_rank = torch.linalg.matrix_rank(self.paths_distance)
+        self.paths_distance_stable_rank = stable_rank(self.paths_distance)
+        self.paths_distance_min_error = best_low_rank_approx_error(self.paths_similarity, rank=rank)
+        print(f"Paths similarity, Rank: {self.paths_distance_rank}, Stable rank: {self.paths_distance_stable_rank}, Min error: {self.paths_distance_min_error}")
+
     def compute_paths_probabilities_optimize(self, rank):
         self.paths_probabilities = None
         self.paths_probabilities = get_path_probabilities_reduce_error(self.A).double()
@@ -325,6 +350,7 @@ if __name__ == "__main__":
         p.compute_paths_count(15, 12)
         p.compute_paths_probabilities_mean(10, 15, 8)
         p.compute_paths_similarity(10, 15, 8)
+        p.compute_paths_distance(1, 15, 8)
         print("\n")
 
         results.append(
