@@ -133,7 +133,12 @@ def get_path_distance(A, length_min, length_max):
         p = get_path_probabilities(A, i)
         p = p.sum(dim=0)
         p_concat[:, i-length_min] = p
-    return p_concat
+    sim = p_concat @ p_concat.T
+    ones = torch.ones(A.shape).to(A.device)
+    diagonal = torch.diag(torch.diagonal(sim))
+    # d_ij = ||x_i - x_j||^2 = x_i^T x_i + x_i x_i^T - 2x_i x_j = g_ii + g_jj - 2g_ij
+    dist = diagonal @ ones.T + ones @ diagonal.T - 2 * sim
+    return dist
 
 
 def get_path_probabilities_mean(A, length_min, length_max):
